@@ -2,20 +2,22 @@ import mongoose from "mongoose"
 import Category from "../models/category.js"
 
 const connectDb=async()=>{
-    try{
-        const connect=await mongoose.connect(process.env.MONGODB_URI)
-        const defaults = ["Technology", "Travel", "Lifestyle", "Business", "Education"];
-        await Promise.all(
-            defaults.map((title) =>
-                Category.updateOne({ title }, { $setOnInsert: { title } }, { upsert: true }),
-            ),
-        );
-        console.log("mongodb connected successfully")
+    const mongoUri = process.env.MONGODB_URI;
 
+    if (!mongoUri) {
+        throw new Error("MONGODB_URI is missing. Add it to blog-cms/.env");
     }
-    catch(err){
-        console.log(`some error occured during connection ${err}`)
-    }
+
+    const connect=await mongoose.connect(mongoUri, {
+        serverSelectionTimeoutMS: 5000,
+    })
+    const defaults = ["Technology", "Travel", "Lifestyle", "Business", "Education"];
+    await Promise.all(
+        defaults.map((title) =>
+            Category.updateOne({ title }, { $setOnInsert: { title } }, { upsert: true }),
+        ),
+    );
+    console.log(`mongodb connected successfully: ${connect.connection.host}`)
 }
 
 export default connectDb

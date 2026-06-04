@@ -21,9 +21,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// db
-connectDb();
-
 // Middleware
 app.use(express.json());
 
@@ -34,6 +31,17 @@ app.use("/api/categories", categoryRoutes);
 app.use(errorHandler);
 
 // Server start
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+const startServer = async () => {
+  try {
+    await connectDb();
+
+    app.listen(PORT, () => {
+      console.log(`Server running at http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error(`Server startup failed: ${error.message}`);
+    process.exit(1);
+  }
+};
+
+startServer();
