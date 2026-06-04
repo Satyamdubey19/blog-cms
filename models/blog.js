@@ -11,12 +11,14 @@ const blogSchema = new mongoose.Schema(
     content: {
       type: String,
       required: [true, "Content is required"],
+      minlength: [20, "Content must be at least 20 characters"],
     },
 
     slug: {
       type: String,
       unique: true,
       lowercase: true,
+      trim: true,
     },
 
     coverImage: {
@@ -46,6 +48,13 @@ const blogSchema = new mongoose.Schema(
       default: true,
     },
 
+    status: {
+      type: String,
+      enum: ["draft", "published"],
+      default: "published",
+      index: true,
+    },
+
     isDeleted: {
       type: Boolean,
       default: false,
@@ -53,5 +62,7 @@ const blogSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+blogSchema.index({ title: "text", content: "text", tags: "text" });
 
 export default mongoose.model("Blog", blogSchema);

@@ -5,6 +5,21 @@ import { AppError } from "../utills/errorHandler.js";
 import User from "../models/user.js";
 import Category from "../models/category.js";
 
+const createSlug = (value = "") =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\w-]+/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+const parseBoolean = (value, fallback = true) => {
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  return value === "true";
+};
+
 //  Tags parse karo (string ya array dono handle)
 const parseTags = (tags) => {
   if (!tags) return [];
@@ -77,11 +92,51 @@ const getAllBlogs = async (req, res, next) => {
       search: req.query.search || "",
       tag: req.query.tag || "",
       category: categoryId || "",
+      userId: req.user?.id,
       page,
       limit,
     };
 
     const { blogs, count } = await blogService.getAllBlogs(query);
+
+    res.status(200).json({
+      success: true,
+      count,
+      blogs,
+      pagination: {
+        current: page,
+        pages: Math.ceil(count / limit),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET CURRENT USER BLOGS
+// GET /api/blogs/mine?search=&tag=&category=&page=&limit=
+
+const getMyBlogs = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    let categoryId = "";
+    if (req.query.category) {
+      categoryId = await resolveCategoryId(req.query.category, next);
+      if (!categoryId) return;
+    }
+
+    const { blogs, count } = await blogService.getAllBlogs({
+      search: req.query.search || "",
+      tag: req.query.tag || "",
+      category: categoryId || "",
+      page,
+      limit,
+      includeDrafts: true,
+      author: req.user.id,
+      userId: req.user.id,
+    });
 
     res.status(200).json({
       success: true,
@@ -105,7 +160,15 @@ const getBlogById = async (req, res, next) => {
     const blog = await blogService.getBlogById(req.params.id);
     if (!blog) return next(new AppError("Blog not found", 404));
 
-    res.status(200).json({ success: true, blog });
+    if (
+      (!blog.isPublic || blog.status === "draft") &&
+      (!req.user || (blog.author._id.toString() !== req.user.id && req.user.role !== "Admin" && req.user.role !== "admin"))
+    ) {
+      return next(new AppError("You do not have permission to view this blog", 403));
+    }
+
+    const engagement = await blogService.getEngagementForBlog(blog._id, req.user?.id);
+    res.status(200).json({ success: true, blog: { ...blog.toObject(), ...engagement } });
   } catch (err) {
     next(err);
   }
@@ -117,7 +180,7 @@ const getBlogById = async (req, res, next) => {
 
 const createBlog = async (req, res, next) => {
   try {
-    const { title, content, tags, category } = req.body;
+    const { title, content, tags, category, slug } = req.body;
 
     if (!title || !content) {
       return next(new AppError("Title and content are required", 400));
@@ -130,8 +193,11 @@ const createBlog = async (req, res, next) => {
     const blogData = {
       title: title.trim(),
       content: content.trim(),
+      slug: createSlug(slug || title),
       tags: parseTags(tags),
       author: req.user.id,
+      isPublic: parseBoolean(req.body.isPublic, true),
+      status: parseBoolean(req.body.isPublic, true) ? "published" : "draft",
       ...(categoryId && { category: categoryId }),
     };
 
@@ -160,7 +226,7 @@ const createBlog = async (req, res, next) => {
 
 const updateBlog = async (req, res, next) => {
   try {
-    const { title, content, tags, category } = req.body;
+    const { title, content, tags, category, slug } = req.body;
 
     // Pehle blog fetch karo — authorization check ke liye
     const blog = await Blog.findById(req.params.id);
@@ -175,6 +241,11 @@ const updateBlog = async (req, res, next) => {
 
     if (title) blogData.title = title.trim();
     if (content) blogData.content = content.trim();
+    if (slug || title) blogData.slug = createSlug(slug || title);
+    if (req.body.isPublic !== undefined) {
+      blogData.isPublic = parseBoolean(req.body.isPublic, true);
+      blogData.status = blogData.isPublic ? "published" : "draft";
+    }
 
     const parsedTags = parseTags(tags);
     if (parsedTags.length) blogData.tags = parsedTags;
@@ -195,6 +266,62 @@ const updateBlog = async (req, res, next) => {
 
     const updatedBlog = await blogService.updateBlog(req.params.id, blogData);
     res.status(200).json({ success: true, blog: updatedBlog });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getBlogComments = async (req, res, next) => {
+  try {
+    const blog = await blogService.getBlogById(req.params.id);
+    if (!blog) return next(new AppError("Blog not found", 404));
+
+    const comments = await blogService.getComments(blog._id);
+    res.status(200).json({ success: true, comments });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const createBlogComment = async (req, res, next) => {
+  try {
+    const { content } = req.body;
+    if (!content || content.trim().length < 2) {
+      return next(new AppError("Comment must be at least 2 characters", 400));
+    }
+
+    const blog = await blogService.getBlogById(req.params.id);
+    if (!blog) return next(new AppError("Blog not found", 404));
+
+    const comment = await blogService.createComment({
+      blog: blog._id,
+      author: req.user.id,
+      content: content.trim(),
+    });
+
+    const populated = await comment.populate("author", "name email");
+    res.status(201).json({ success: true, comment: populated });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const deleteBlogComment = async (req, res, next) => {
+  try {
+    await blogService.deleteComment({ commentId: req.params.commentId, user: req.user });
+    res.status(200).json({ success: true, message: "Comment deleted" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const toggleBlogLike = async (req, res, next) => {
+  try {
+    const blog = await blogService.getBlogById(req.params.id);
+    if (!blog) return next(new AppError("Blog not found", 404));
+
+    const result = await blogService.toggleLike({ blog: blog._id, user: req.user.id });
+    res.status(200).json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
@@ -228,4 +355,9 @@ export {
   updateBlog,
   deleteBlog,
   getAdminStaticsOfUserBlog,
+  getMyBlogs,
+  getBlogComments,
+  createBlogComment,
+  deleteBlogComment,
+  toggleBlogLike,
 };

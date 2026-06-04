@@ -30,4 +30,21 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+export const optionalAuthMiddleware = async (req, res, next) => {
+  try {
+    const authHeader = req.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];
+
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+      req.admin = decoded;
+    }
+
+    next();
+  } catch {
+    next();
+  }
+};
+
 export default authMiddleware;

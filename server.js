@@ -7,6 +7,7 @@ import blogRoutes from "./routes/blogRoutes.js"
 import authRoutes from "./routes/authRoutes.js"
 import categoryRoutes from "./routes/categoryRoutes.js"
 import cors from "cors";
+import { errorHandler } from "./utills/errorHandler.js";
 
 
 const app = express();
@@ -30,6 +31,7 @@ app.use(express.json());
 app.use("/api/blogs",blogRoutes)
 app.use("/api/auth",authRoutes)
 app.use("/api/categories", categoryRoutes);
+app.use(errorHandler);
 
 // Server start
 app.listen(PORT, () => {
